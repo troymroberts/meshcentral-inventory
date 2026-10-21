@@ -8,7 +8,7 @@
   "homepage": "https://github.com/troymroberts/meshcentral-inventory",
   "changelogUrl": "https://github.com/troymroberts/meshcentral-inventory/releases",
   "configUrl": "https://raw.githubusercontent.com/troymroberts/meshcentral-inventory/main/config.json",
-  "downloadUrl": "https://raw.githubusercontent.com/troymroberts/meshcentral-inventory/v1.4.2.2/release-assets/MeshCentral-Inventory.zip",
+  "downloadUrl": "https://raw.githubusercontent.com/troymroberts/meshcentral-inventory/main/release-assets/MeshCentral-Inventory.zip",
   "repository": {
     "type": "git",
     "url": "https://github.com/troymroberts/meshcentral-inventory.git"
