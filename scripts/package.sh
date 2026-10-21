@@ -14,7 +14,9 @@ cp "$project/lib/model.js" "$project/lib/network.js" "$stage/inventory/lib/"
 cp "$project/views/inventory.handlebars" "$stage/inventory/views/"
 archive="$dist/MeshCentral-Inventory-$version.zip"
 rm -f "$archive"
-(cd "$stage" && TZ=UTC find inventory -type f -exec touch -t 202601010000 {} + && find inventory -type f | sort | zip -X -q -9 "$archive" -@)
+# Directory entries are required: MeshCentral's installer only creates folders for explicit
+# "dir/" entries and crashes (ENOENT, unhandled stream error) on a file in a missing folder.
+(cd "$stage" && TZ=UTC find inventory -exec touch -t 202601010000 {} + && find inventory | sort | zip -X -q -9 "$archive" -@)
 cp "$archive" "$dist/MeshCentral-Inventory.zip"
 mkdir -p "$project/release-assets" && cp "$archive" "$project/release-assets/MeshCentral-Inventory.zip"
 echo "$project/release-assets/MeshCentral-Inventory.zip"
