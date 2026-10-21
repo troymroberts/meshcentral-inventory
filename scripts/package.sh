@@ -10,7 +10,7 @@ trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/inventory/lib" "$stage/inventory/views"
 cp "$project/inventory.js" "$project/config.json" "$project/README.md" "$project/LICENSE" "$stage/inventory/"
 [ -f "$project/NOTICE" ] && cp "$project/NOTICE" "$stage/inventory/"
-cp "$project/lib/model.js" "$stage/inventory/lib/"
+cp "$project/lib/model.js" "$project/lib/network.js" "$stage/inventory/lib/"
 cp "$project/views/inventory.handlebars" "$stage/inventory/views/"
 archive="$dist/MeshCentral-Inventory-$version.zip"
 rm -f "$archive"
