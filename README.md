@@ -1,5 +1,11 @@
 # MeshCentral Inventory
 
+> **Fork notice.** This is a reviewed fork of [maxdorx/meshcentral-inventory](https://github.com/maxdorx/meshcentral-inventory)
+> maintained by troymroberts. The plugin's update channel (`config.json` → `configUrl`/`downloadUrl`) points at this
+> fork's **tagged releases**, so MeshCentral's *Upgrade* button only offers versions published here after review.
+> Upstream changes are merged deliberately (`git fetch upstream && git diff main upstream/main`), then released as
+> `<upstream version>.<fork revision>` (e.g. `1.4.2.1`). See `NOTICE` for attribution.
+
 Inventory and lifecycle management for MeshCentral workstations and peripherals.
 
 ## Features
@@ -34,7 +40,7 @@ Inventory and lifecycle management for MeshCentral workstations and peripherals.
 3. Enter:
 
    ```text
-   https://raw.githubusercontent.com/maxdorx/meshcentral-inventory/main/config.json
+   https://raw.githubusercontent.com/troymroberts/meshcentral-inventory/main/config.json
    ```
 
 4. Install Inventory, refresh MeshCentral, and select **Synchronize** for the first scan.
@@ -55,7 +61,15 @@ Use **Upgrade** from the Inventory plugin row when MeshCentral reports a newer v
 
 ```powershell
 node --test --test-isolation=none
-npm run package
+npm run package        # Linux/macOS (scripts/package.sh)
+npm run package:ps     # Windows (scripts/package.ps1)
+```
+
+### Releasing (fork)
+
+```bash
+npm test && bash scripts/package.sh
+gh release create v<version> dist/MeshCentral-Inventory.zip --title v<version> --notes "..."
 ```
 
 ## License

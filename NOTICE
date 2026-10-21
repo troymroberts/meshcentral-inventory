@@ -1,0 +1,10 @@
+MeshCentral Inventory
+Copyright maxdorx — https://github.com/maxdorx/meshcentral-inventory (Apache-2.0)
+
+This is a fork maintained by troymroberts (Paxgenesis Ltd):
+https://github.com/troymroberts/meshcentral-inventory
+
+Modified files: config.json, package.json, README.md, test/config.test.js, .gitignore;
+added scripts/package.sh and NOTICE. Changes: plugin update channel points at this fork's
+tagged GitHub releases; Linux packaging script. Plugin code is unchanged from upstream
+unless a release note says otherwise.
