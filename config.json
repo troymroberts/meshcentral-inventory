@@ -6,6 +6,7 @@
   "description": "Workstation lifecycle from MeshCentral agent details plus manual peripheral inventory and CSV import.",
   "hasAdminPanel": true,
   "homepage": "https://github.com/troymroberts/meshcentral-inventory",
+  "changelogUrl": "https://github.com/troymroberts/meshcentral-inventory/releases",
   "configUrl": "https://raw.githubusercontent.com/troymroberts/meshcentral-inventory/main/config.json",
   "downloadUrl": "https://github.com/troymroberts/meshcentral-inventory/releases/download/v1.4.2.1/MeshCentral-Inventory.zip",
   "repository": {
