@@ -104,14 +104,15 @@ npm run package:ps     # Windows (scripts/package.ps1)
 
 ```bash
 npm test && bash scripts/package.sh        # also refreshes release-assets/MeshCentral-Inventory.zip
-# bump version + downloadUrl (raw.githubusercontent.com/.../v<version>/release-assets/...) in config.json first
+# bump version in config.json (+ package.json, test/config.test.js) first; downloadUrl stays on main
 git commit -am "Release v<version>" && git tag -a v<version> -m v<version> && git push origin main v<version>
 gh release create v<version> dist/MeshCentral-Inventory.zip --repo troymroberts/meshcentral-inventory --title v<version>
 ```
 
 `downloadUrl` must serve the zip without a redirect: MeshCentral's plugin downloader drops the query string when it
 follows a redirect, so GitHub release-asset URLs (302 to a signed URL) fail with "Error downloading plugin: HTTP 618".
-The raw URL of the tag's committed `release-assets/` zip is immutable and served directly.
+The raw URL of main's committed `release-assets/` zip is served directly. It must not be pinned to a tag: MeshCentral's
+Upgrade downloads the `downloadUrl` saved at the previous install, so a tag URL would refetch the old version.
 
 ## License
 
