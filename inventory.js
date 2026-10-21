@@ -3,6 +3,7 @@
 module.exports.inventory = function inventoryPlugin(pluginHandler) {
     const crypto = require('crypto');
     const model = require('./lib/model');
+    const network = require('./lib/network');
     const manifest = require('./config.json');
     const plugin = {};
     const root = pluginHandler.parent;
@@ -171,7 +172,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
 
     function inventoryRecordFamily(id) {
         if (typeof id !== 'string') return '';
-        for (const family of ['inventoryasset', 'inventoryassetbackup', 'inventorysettings', 'inventorymigration']) {
+        for (const family of ['inventoryasset', 'inventoryassetbackup', 'inventorysettings', 'inventorymigration', 'inventorynetport']) {
             if (id.startsWith(`${family}/`)) return family;
         }
         return '';
@@ -227,7 +228,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
     }
 
     function createInventoryBackup(records) {
-        const counts = { inventoryasset: 0, inventoryassetbackup: 0, inventorysettings: 0, inventorymigration: 0, untyped: 0 };
+        const counts = { inventoryasset: 0, inventoryassetbackup: 0, inventorysettings: 0, inventorymigration: 0, inventorynetport: 0, untyped: 0 };
         for (const record of records) {
             counts[inventoryRecordFamily(record._id)]++;
             if (record.type === undefined) counts.untyped++;
@@ -498,6 +499,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
         for (const field of ['assetTag', 'location', 'notes', 'purchaseDate', 'warrantyEnd']) {
             if (!canonical.manual[field] && duplicate.manual && duplicate.manual[field]) canonical.manual[field] = duplicate.manual[field];
         }
+        if (!canonical.network && duplicate.network) canonical.network = cloneDocument(duplicate.network);
         if (assignees.length > 0 && ['Discovered', 'Available'].includes(canonical.status)) canonical.status = 'Assigned';
         if (canonical.recordState === 'Archived' && duplicate.recordState !== 'Archived') canonical.recordState = 'Active';
         canonical.createdAt = Math.min(Number(canonical.createdAt) || now, Number(duplicate.createdAt) || now);
@@ -1031,6 +1033,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
             linkedNodeCount: liveContext && liveContext.nodeById ? linkedNodes.length : (fullAdmin ? allNodeIds.length : (asset.nodeid ? 1 : 0)),
             linkedNodes,
             identityResolutions: asset.identityResolutions || [],
+            network: network.publicNetwork(asset, liveContext && liveContext.netports),
             createdAt: asset.createdAt || null,
             updatedAt: asset.updatedAt || null
         };
@@ -1053,7 +1056,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
             if (asset.status === 'In Repair') result.repair++;
             if (asset.status === 'Retired') result.retired++;
             const identityMissing = asset.source !== 'manual' && isWorkstation(asset) && !model.normalizeSerial(asset.identity && asset.identity.serial) && !model.normalizeUuid(asset.identity && asset.identity.uuid);
-            if ((asset.assignment.pending || []).length > 0 || (asset.identityConflicts || []).length > 0 || (asset.duplicateConflicts || []).length > 0 || Number(asset.linkedNodeCount) > 1 || identityMissing || (asset.reviews || []).some((item) => !item.snoozedUntil || Date.parse(`${item.snoozedUntil}T23:59:59Z`) < Date.now())) result.review++;
+            if ((asset.assignment.pending || []).length > 0 || (asset.identityConflicts || []).length > 0 || (asset.duplicateConflicts || []).length > 0 || Number(asset.linkedNodeCount) > 1 || identityMissing || (asset.network && asset.network.issues || []).length > 0 || (asset.reviews || []).some((item) => !item.snoozedUntil || Date.parse(`${item.snoozedUntil}T23:59:59Z`) < Date.now())) result.review++;
         }
         return result;
     }
@@ -1077,7 +1080,10 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
     async function requireAsset(command, session, permissionName) {
         const id = model.text(command.assetId, 256);
         if (!id.startsWith(`inventoryasset/${session.domain.id}/`)) throw new Error('Invalid asset identifier.');
-        const asset = await dbGet(id);
+        return authorizeAsset(await dbGet(id), session, permissionName);
+    }
+
+    async function authorizeAsset(asset, session, permissionName) {
         if (!asset || !visibleToUser(asset, session.user)) throw new Error('Asset not found or not accessible.');
         // MeshCentral 1.2.6 attempts to resolve a supplied node id when no mesh id
         // accompanies it. A retained/manual record may not have a live node, and
@@ -1302,17 +1308,264 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
         return created;
     }
 
+    // ---- Physical network documentation (see lib/network.js) ----
+
+    function netportRecordId(domain) {
+        const hash = crypto.createHash('sha256').update(`${domain}\nnetport\n${Date.now()}\n${crypto.randomBytes(16).toString('hex')}`).digest('hex').substring(0, 32);
+        return `inventorynetport/${domain}/${hash}`;
+    }
+
+    function netportVisible(netport, user, accessibleMeshIds) {
+        if (!netport || !user || netport.domain !== user.domain || netport.type !== 'inventorynetport') return false;
+        if (isFullAdmin(user)) return true;
+        if (!netport.scope || netport.scope.kind === 'domain') return true;
+        const allowed = accessibleMeshIds || new Set(userMeshIds(user));
+        return Boolean(netport.scope.meshid && allowed.has(netport.scope.meshid));
+    }
+
+    async function networkContext(domain, user) {
+        const accessibleMeshIds = isFullAdmin(user) ? null : new Set(userMeshIds(user));
+        const netports = (await dbAll('inventorynetport', domain)).filter((netport) => netportVisible(netport, user, accessibleMeshIds));
+        return { netports };
+    }
+
+    // Network ports follow the peripheral scoping rules: a device-group scope,
+    // or a domain-wide scope that only full administrators may assign.
+    function netportScope(meshid, user) {
+        const requested = model.text(meshid, 256);
+        if (!requested) {
+            if (!isFullAdmin(user)) throw new Error('A device group you can access is required for a network port.');
+            return { kind: 'domain' };
+        }
+        if (!requested.startsWith(`mesh/${user.domain}/`)) throw new Error('Invalid device group identifier.');
+        if (!isFullAdmin(user) && !userMeshIds(user).includes(requested)) throw new Error('Device group not found or not accessible.');
+        return { kind: 'mesh', meshid: requested, meshName: meshName(requested) || '' };
+    }
+
+    async function requireNetport(command, session, permissionName) {
+        const id = model.text(command.netportId, 256);
+        if (!id.startsWith(`inventorynetport/${session.domain.id}/`)) throw new Error('Invalid network port identifier.');
+        const netport = await dbGet(id);
+        if (!netportVisible(netport, session.user)) throw new Error('Network port not found or not accessible.');
+        const meshid = netport.scope && netport.scope.kind === 'mesh' ? netport.scope.meshid : '';
+        const check = await permissions(session.user, meshid ? { meshid } : {});
+        if (!check(permissionName)) throw new Error('Permission denied.');
+        return netport;
+    }
+
+    function netportRowsFrom(command) {
+        if (typeof command.csv === 'string') return network.parseNetportCsv(command.csv);
+        return command.rows;
+    }
+
+    function publicNetports(netports, assets, user) {
+        const issues = network.netportIssues(netports);
+        const accessibleMeshIds = isFullAdmin(user) ? null : new Set(userMeshIds(user));
+        const observedByNetport = new Map();
+        for (const asset of assets || []) {
+            if (!asset.network || !asset.network.observed || !visibleToUser(asset, user, accessibleMeshIds)) continue;
+            for (const netport of network.matchingNetports(asset.network.observed, netports)) {
+                observedByNetport.set(netport._id, (observedByNetport.get(netport._id) || []).concat([{ id: asset._id, name: asset.name || '' }]));
+            }
+        }
+        return netports
+            .slice()
+            .sort((left, right) => `${left.site || ''}\n${left.jack || ''}`.localeCompare(`${right.site || ''}\n${right.jack || ''}`, undefined, { numeric: true }))
+            .map((netport) => network.publicNetport(netport, issues.get(netport._id), observedByNetport.get(netport._id)));
+    }
+
+    // Applies changes.documentedJack from the update action. Returns true when
+    // the documented jack changed (the caller saves the asset).
+    async function applyDocumentedJack(asset, changes, session) {
+        if (changes.documentedJack === undefined) return false;
+        const requested = model.text(changes.documentedJack, 256);
+        const current = asset.network && asset.network.documentedJack || '';
+        if (requested === current) return false;
+        let label = '';
+        if (requested) {
+            if (!requested.startsWith(`inventorynetport/${session.domain.id}/`)) throw new Error('Invalid network port identifier.');
+            const netport = await dbGet(requested);
+            if (!netportVisible(netport, session.user)) throw new Error('Network port not found or not accessible.');
+            label = network.portLabel(netport);
+        }
+        asset.network = asset.network || {};
+        if (requested) asset.network.documentedJack = requested;
+        else delete asset.network.documentedJack;
+        asset.type = 'inventoryasset';
+        asset.updatedAt = Date.now();
+        model.addHistory(asset, 'network.documented-jack', session.user._id, requested ? `Documented network ${label}` : 'Cleared the documented network jack', asset.updatedAt);
+        return true;
+    }
+
+    // Finds the asset for an observation by asset id, MeshCentral node id, or
+    // MAC address (live agent interface data first, then MACs the asset was
+    // previously observed with).
+    async function locateObservedAsset(command, session, mac) {
+        if (command.assetId) return requireAsset(command, session, 'can_manage');
+        const domain = session.domain.id;
+        const assets = await dbAll('inventoryasset', domain);
+        let candidates = [];
+        const nodeid = model.text(command.nodeid, 256);
+        if (nodeid) {
+            if (!nodeid.startsWith(`node/${domain}/`)) throw new Error('Invalid node identifier.');
+            candidates = assets.filter((asset) => asset.nodeid === nodeid || (asset.nodeids || []).includes(nodeid));
+        } else if (mac) {
+            const ifinfos = await dbAll('ifinfo', domain);
+            const nodeids = new Set(ifinfos
+                .filter((record) => record && typeof record._id === 'string' && record._id.startsWith('ifnode/') && network.interfaceMacs(record).includes(mac))
+                .map((record) => record._id.substring(2)));
+            candidates = assets.filter((asset) => [asset.nodeid].concat(asset.nodeids || []).some((id) => id && nodeids.has(id)));
+            if (candidates.length === 0) candidates = assets.filter((asset) => network.knownMacs(asset).includes(mac));
+        } else {
+            throw new Error('An assetId, nodeid, or mac is required.');
+        }
+        const accessibleMeshIds = isFullAdmin(session.user) ? null : new Set(userMeshIds(session.user));
+        const visible = candidates.filter((asset) => visibleToUser(asset, session.user, accessibleMeshIds));
+        if (visible.length === 0) throw new Error('Asset not found or not accessible.');
+        if (visible.length > 1) throw new Error('More than one inventory asset matches this observation; supply assetId.');
+        return authorizeAsset(visible[0], session, 'can_manage');
+    }
+
+    async function handleNetworkAction(action, command, session) {
+        const domain = session.domain.id;
+        const user = session.user;
+
+        if (action === 'network-observe') {
+            const supplied = command.observation && typeof command.observation === 'object' ? command.observation : {};
+            const parsed = network.observationInput(Object.assign({}, supplied, { mac: supplied.mac || command.mac }), Date.now());
+            if (parsed.errors.length > 0) throw new Error(parsed.errors.join(' '));
+            return withQueue(`domain:${domain}`, async () => {
+                const asset = await locateObservedAsset(command, session, parsed.value.mac);
+                const outcome = network.applyObservation(asset, parsed.value, user._id, Date.now());
+                if (!outcome.stale) {
+                    asset.type = 'inventoryasset';
+                    await dbSetAsset(asset);
+                }
+                return {
+                    kind: 'network-observed',
+                    changed: outcome.changed, moved: outcome.moved, stale: outcome.stale,
+                    asset: publicAsset(asset, false, user, await networkContext(domain, user))
+                };
+            });
+        }
+
+        if (action === 'netport-list' || action === 'netport-export') {
+            const check = await permissions(user, {});
+            if (!check('can_view')) throw new Error('Permission denied.');
+            const [context, assets] = await Promise.all([networkContext(domain, user), dbAll('inventoryasset', domain)]);
+            const site = model.text(command.site, 256).toLowerCase();
+            const search = model.text(command.search, 256).toLowerCase();
+            const netports = context.netports.filter((netport) => (!site || model.text(netport.site, 256).toLowerCase() === site)
+                && (!search || [netport.jack, netport.room, netport.patchPanel, netport.switchName, netport.switchMac, netport.notes].join(' ').toLowerCase().includes(search)));
+            const output = publicNetports(netports, assets, user);
+            if (action === 'netport-export') {
+                return { kind: 'netport-export', count: output.length, csv: network.netportsToCsv(output) };
+            }
+            return {
+                kind: 'netport-list',
+                netports: output,
+                sites: Array.from(new Set(context.netports.map((netport) => netport.site || '').filter(Boolean))).sort(),
+                statuses: network.NETPORT_STATUSES,
+                csvFields: network.NETPORT_CSV_FIELDS,
+                capabilities: { canManage: check('can_manage'), canUseDomainScope: isFullAdmin(user) }
+            };
+        }
+
+        const check = await permissions(user, {});
+        if (!check('can_manage')) throw new Error('Permission denied.');
+
+        if (action === 'netport-preview' || action === 'netport-import' || action === 'netport-create') {
+            const rows = action === 'netport-create' ? [command.netport || {}] : netportRowsFrom(command);
+            const scopeSource = action === 'netport-create' ? (command.netport && command.netport.meshid) : command.meshid;
+            const scope = netportScope(scopeSource, user);
+            return withQueue(`domain:${domain}`, async () => {
+                const existing = await dbAll('inventorynetport', domain);
+                const prepared = network.prepareNetportRows(rows, existing, null);
+                if (action === 'netport-preview') return { kind: 'netport-preview', rows: prepared };
+                const invalid = prepared.filter((row) => row.errors.length > 0);
+                if (invalid.length > 0) {
+                    if (action === 'netport-create') throw new Error(invalid[0].errors.join(' '));
+                    throw new Error(`Import has ${invalid.length} invalid row${invalid.length === 1 ? '' : 's'}. Correct the preview errors before importing.`);
+                }
+                const created = [];
+                try {
+                    for (const row of prepared) {
+                        const netport = network.createNetport(netportRecordId(domain), domain, row.value, scope, user._id, Date.now());
+                        await dbSet(netport);
+                        created.push(netport);
+                    }
+                } catch (error) {
+                    if (typeof db.Remove === 'function') {
+                        for (const netport of created) {
+                            try { await dbRemove(netport._id); } catch (rollbackError) { log(`Unable to roll back network port ${netport._id}`, rollbackError); }
+                        }
+                    }
+                    throw error;
+                }
+                const assets = await dbAll('inventoryasset', domain);
+                return {
+                    kind: action === 'netport-create' ? 'netport-created' : 'netport-imported',
+                    count: created.length,
+                    netports: publicNetports(created, assets, user)
+                };
+            });
+        }
+
+        if (action === 'netport-update') {
+            return withQueue(`domain:${domain}`, async () => {
+                const netport = await requireNetport(command, session, 'can_manage');
+                const changes = command.changes && typeof command.changes === 'object' ? command.changes : {};
+                const row = {};
+                for (const field of network.NETPORT_CSV_FIELDS) row[field] = changes[field] !== undefined ? changes[field] : netport[field];
+                const existing = await dbAll('inventorynetport', domain);
+                const prepared = network.prepareNetportRows([row], existing, netport._id)[0];
+                if (prepared.errors.length > 0) throw new Error(prepared.errors.join(' '));
+                const now = Date.now();
+                let changed = network.applyNetport(netport, prepared.value, user._id, now);
+                if (changes.meshid !== undefined) {
+                    const scope = netportScope(changes.meshid, user);
+                    const currentMeshId = netport.scope && netport.scope.kind === 'mesh' ? netport.scope.meshid : '';
+                    if ((scope.meshid || '') !== currentMeshId) {
+                        netport.scope = scope;
+                        netport.updatedAt = now;
+                        model.addHistory(netport, 'netport.scope', user._id, scope.kind === 'mesh' ? `Scoped to device group ${scope.meshName || scope.meshid}` : 'Scoped to the whole domain', now);
+                        changed = true;
+                    }
+                }
+                if (changed) await dbSet(netport);
+                const assets = await dbAll('inventoryasset', domain);
+                const context = await networkContext(domain, user);
+                const output = publicNetports(context.netports, assets, user).find((item) => item.id === netport._id);
+                return { kind: 'netport', netport: output, unchanged: !changed };
+            });
+        }
+
+        if (action === 'netport-delete') {
+            return withQueue(`domain:${domain}`, async () => {
+                const netport = await requireNetport(command, session, 'can_manage');
+                if (command.confirm !== true) throw new Error('Deletion confirmation is required.');
+                if (typeof db.Remove !== 'function') throw new Error('This MeshCentral database does not support record deletion.');
+                await dbRemove(netport._id);
+                return { kind: 'netport-deleted', netportId: netport._id };
+            });
+        }
+
+        throw new Error('Unsupported inventory action.');
+    }
+
     async function handleBrowserAction(command, session) {
         const action = model.text(command.pluginaction, 64);
         const domain = session.domain.id;
         if (inventoryMaintenanceActive) throw new Error('Inventory backup or restore is in progress. Try again shortly.');
+        if (action === 'network-observe' || action.startsWith('netport-')) return handleNetworkAction(action, command, session);
 
         if (action === 'list') {
             const check = await permissions(session.user, {});
             if (!check('can_view')) throw new Error('Permission denied.');
             const accessibleMeshIds = isFullAdmin(session.user) ? null : new Set(userMeshIds(session.user));
-            const [storedAssets, liveContext] = await Promise.all([dbAll('inventoryasset', domain), liveContextForDomain(domain)]);
+            const [storedAssets, liveContext, netContext] = await Promise.all([dbAll('inventoryasset', domain), liveContextForDomain(domain), networkContext(domain, session.user)]);
             liveContext.accessibleMeshIds = accessibleMeshIds;
+            liveContext.netports = netContext.netports;
             const assets = storedAssets.filter((asset) => visibleToUser(asset, session.user, accessibleMeshIds));
             assets.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
             const output = assets.map((asset) => publicAsset(asset, false, session.user, liveContext));
@@ -1332,6 +1585,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
             const asset = await requireAsset(command, session, 'can_view');
             const liveContext = await liveContextForDomain(domain);
             liveContext.accessibleMeshIds = isFullAdmin(session.user) ? null : new Set(userMeshIds(session.user));
+            liveContext.netports = (await networkContext(domain, session.user)).netports;
             return { kind: 'asset', asset: publicAsset(asset, true, session.user, liveContext) };
         }
 
@@ -1387,7 +1641,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                 const seed = `manual-workstation\n${Date.now()}\n${crypto.randomBytes(16).toString('hex')}`;
                 const asset = model.createManualWorkstation(assetId(domain, seed), domain, prepared.value, session.user._id, Date.now());
                 await dbSetAsset(asset);
-                return { kind: 'workstation-created', asset: publicAsset(asset, true, session.user) };
+                return { kind: 'workstation-created', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)) };
             });
         }
 
@@ -1402,9 +1656,10 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                     return { kind: 'peripheral-preview', rows: peripheralPreview(prepared) };
                 }
                 const created = await createPeripheralRecords(domain, prepared, session.user._id);
+                const netContext = await networkContext(domain, session.user);
                 return {
                     kind: action === 'peripheral-create' ? 'peripheral-created' : 'peripheral-imported',
-                    assets: created.map((asset) => publicAsset(asset, true, session.user)),
+                    assets: created.map((asset) => publicAsset(asset, true, session.user, netContext)),
                     count: created.length
                 };
             });
@@ -1415,6 +1670,11 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                 const asset = await requireAsset(command, session, 'can_manage');
                 const changes = command.changes && typeof command.changes === 'object' ? command.changes : {};
                 const previousStatus = asset.status;
+                const jackChanged = await applyDocumentedJack(asset, changes, session);
+                const unchangedResult = async () => {
+                    if (jackChanged) await dbSetAsset(asset);
+                    return { kind: 'asset', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)), unchanged: !jackChanged };
+                };
                 if (isPeripheral(asset)) {
                     const currentUser = asset.assignment && asset.assignment.assignees && asset.assignment.assignees[0];
                     const row = {
@@ -1436,9 +1696,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                     const prepared = preparePeripheralRows([row], assets, asset._id, session.user)[0];
                     if (prepared.errors.length > 0) throw new Error(prepared.errors.join(' '));
                     const value = prepared.value;
-                    if (peripheralUnchanged(asset, value, prepared.linkedWorkstation)) {
-                        return { kind: 'asset', asset: publicAsset(asset, true, session.user), unchanged: true };
-                    }
+                    if (peripheralUnchanged(asset, value, prepared.linkedWorkstation)) return unchangedResult();
                     asset.name = value.name;
                     asset.status = value.status;
                     asset.identity = { serial: value.serial, uuid: '' };
@@ -1461,7 +1719,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                     asset.updatedAt = Date.now();
                     model.addHistory(asset, 'peripheral.updated', session.user._id, 'Updated manual peripheral inventory fields', asset.updatedAt);
                     await dbSetAsset(asset);
-                    return { kind: 'asset', asset: publicAsset(asset, true, session.user) };
+                    return { kind: 'asset', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)) };
                 }
                 if (isManualWorkstation(asset)) {
                     const currentUser = asset.assignment && asset.assignment.assignees && asset.assignment.assignees[0];
@@ -1484,14 +1742,12 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                     const assets = await dbAll('inventoryasset', domain);
                     const prepared = prepareManualWorkstation(row, assets, asset);
                     if (prepared.errors.length > 0) throw new Error(prepared.errors.join(' '));
-                    if (manualWorkstationUnchanged(asset, prepared.value)) {
-                        return { kind: 'asset', asset: publicAsset(asset, true, session.user), unchanged: true };
-                    }
+                    if (manualWorkstationUnchanged(asset, prepared.value)) return unchangedResult();
                     applyManualWorkstation(asset, prepared.value, session.user._id, Date.now());
                     await dbSetAsset(asset);
                     const currentAssets = assets.filter((item) => item._id !== asset._id).concat([asset]);
                     await reconcileCrossSourceDuplicates(domain, currentAssets, session.user._id, asset.updatedAt);
-                    return { kind: 'asset', asset: publicAsset(asset, true, session.user) };
+                    return { kind: 'asset', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)) };
                 }
                 let nextStatus = asset.status;
                 if (changes.status !== undefined) {
@@ -1512,9 +1768,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                     nextManual[field] = normalizedDate;
                 }
                 const manualChanged = Object.keys(limits).concat(['purchaseDate', 'warrantyEnd']).some((field) => model.text(asset.manual && asset.manual[field], field === 'notes' ? 4000 : 256) !== model.text(nextManual[field], field === 'notes' ? 4000 : 256));
-                if (nextStatus === asset.status && !manualChanged) {
-                    return { kind: 'asset', asset: publicAsset(asset, true, session.user), unchanged: true };
-                }
+                if (nextStatus === asset.status && !manualChanged) return unchangedResult();
                 asset.status = nextStatus;
                 asset.manual = nextManual;
                 asset.type = 'inventoryasset';
@@ -1525,7 +1779,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                     model.addHistory(asset, 'asset.updated', session.user._id, 'Updated manual inventory fields', asset.updatedAt);
                 }
                 await dbSetAsset(asset);
-                return { kind: 'asset', asset: publicAsset(asset, true, session.user) };
+                return { kind: 'asset', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)) };
             });
         }
 
@@ -1536,7 +1790,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                 model.assignmentAction(asset, model.text(command.assignmentAction, 32), requestedUser, session.user._id, Date.now());
                 asset.type = 'inventoryasset';
                 await dbSetAsset(asset);
-                return { kind: 'asset', asset: publicAsset(asset, true, session.user) };
+                return { kind: 'asset', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)) };
             });
         }
 
@@ -1548,7 +1802,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                 if (reviewAction === 'restore' && !isFullAdmin(session.user)) throw new Error('Only a full administrator can restore an archived record.');
                 model.reviewAction(asset, reviewAction, model.text(command.reason, 64), command.until, session.user._id, Date.now());
                 await dbSetAsset(asset);
-                return { kind: 'asset', asset: publicAsset(asset, true, session.user) };
+                return { kind: 'asset', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)) };
             });
         }
 
@@ -1568,7 +1822,7 @@ module.exports.inventory = function inventoryPlugin(pluginHandler) {
                 model.identityConflictAction(asset, identityAction, requestedConflict, session.user._id, Date.now());
                 asset.type = 'inventoryasset';
                 await dbSetAsset(asset);
-                return { kind: 'asset', asset: publicAsset(asset, true, session.user) };
+                return { kind: 'asset', asset: publicAsset(asset, true, session.user, await networkContext(domain, session.user)) };
             });
         }
 

@@ -186,6 +186,8 @@
         .inv-preview td { border-top: 1px solid var(--inv-border); padding: 7px; vertical-align: top; }
         .inv-online { color: var(--bs-success, #198754); }
         .inv-offline { color: var(--inv-muted); }
+        .inv-netports:not(.inv-hidden) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+        .inv-network-chain { margin: 10px 0; padding: 9px 11px; border-radius: 7px; background: rgba(64, 160, 210, .1); font-weight: 650; word-break: break-word; }
         @media (max-width: 1100px) {
             .inv-tabbar { align-items: flex-start; flex-wrap: wrap; }
             .inv-detail-grid { grid-template-columns: 1fr; }
@@ -215,6 +217,7 @@
             <nav class="inv-tabs" id="inventoryTabs" role="tablist" aria-label="Inventory type">
                 <button class="inv-tab active" id="workstationsTab" type="button" role="tab" aria-selected="true">Workstations</button>
                 <button class="inv-tab" id="peripheralsTab" type="button" role="tab" aria-selected="false">Peripherals</button>
+                <button class="inv-tab" id="networkTab" type="button" role="tab" aria-selected="false">Network ports</button>
             </nav>
             <div class="inv-actions">
                 <button class="inv-button" id="rescanButton" type="button">Synchronize</button>
@@ -272,7 +275,7 @@
 
         <div class="inv-grid" id="summaryCards"></div>
 
-        <div class="inv-toolbar">
+        <div class="inv-toolbar" id="assetToolbar">
             <input class="inv-input" id="searchInput" type="search" placeholder="Search device or assigned user…">
             <select class="inv-select" id="statusFilter"><option value="">All lifecycle states</option></select>
             <select class="inv-select inv-hidden" id="typeFilter"><option value="">All peripheral types</option></select>
@@ -304,7 +307,7 @@
             </div>
         </div>
 
-        <div class="inv-table-wrap">
+        <div class="inv-table-wrap" id="assetTableWrap">
             <table class="inv-table">
                 <caption class="inv-sr-only" id="inventoryTableCaption">Workstation inventory</caption>
                 <thead id="assetHead"><tr>
@@ -314,6 +317,28 @@
                 <tbody id="assetRows"></tbody>
             </table>
             <div class="inv-empty" id="emptyState">Loading inventory…</div>
+        </div>
+
+        <div class="inv-netports inv-hidden" id="netportSection">
+            <div class="inv-toolbar">
+                <input class="inv-input" id="netportSearch" type="search" placeholder="Search jack, room, patch panel or switch…">
+                <select class="inv-select" id="netportSiteFilter" aria-label="Site"><option value="">All sites</option></select>
+                <select class="inv-select" id="netportIssueFilter" aria-label="Issues"><option value="">All network ports</option><option value="issues">With issues</option><option value="observed">With an observed device</option></select>
+                <span class="inv-toolbar-spacer"></span>
+                <button class="inv-button" id="netportExportButton" type="button">Export CSV</button>
+                <button class="inv-button" id="netportTemplateButton" type="button">CSV template</button>
+                <button class="inv-button" id="netportImportButton" type="button">Import CSV</button>
+                <button class="inv-button primary" id="addNetportButton" type="button">Add network port</button>
+                <input id="netportImportInput" class="inv-hidden" type="file" accept=".csv,text/csv">
+            </div>
+            <div class="inv-table-wrap">
+                <table class="inv-table">
+                    <caption class="inv-sr-only">Network ports</caption>
+                    <thead><tr><th scope="col">Jack</th><th scope="col">Site</th><th scope="col">Room</th><th scope="col">Patch panel</th><th scope="col">Switch port</th><th scope="col">Status</th><th scope="col">Observed device</th><th scope="col">Issues</th></tr></thead>
+                    <tbody id="netportRows"></tbody>
+                </table>
+                <div class="inv-empty" id="netportEmpty">Loading network ports…</div>
+            </div>
         </div>
     </section>
 
@@ -387,6 +412,14 @@
                     <div class="inv-field" id="manualAssignment"><label for="manualAssignee">Assign user manually</label><div class="inv-user-actions"><input class="inv-input" id="manualAssignee" maxlength="256" placeholder="Username or email"><button class="inv-button small" id="assignManualButton" type="button">Assign</button></div></div>
                     <div id="assignmentReview"></div>
                     <div id="conditionReview"></div>
+                </section>
+
+                <section class="inv-section" id="networkSection">
+                    <h2>Network</h2>
+                    <dl class="inv-fields" id="networkFields"></dl>
+                    <div class="inv-network-chain inv-hidden" id="networkChain"></div>
+                    <div class="inv-field" id="documentedJackField"><label for="documentedJackInput">Documented jack</label><select class="inv-select" id="documentedJackInput"></select></div>
+                    <div id="networkIssues"></div>
                 </section>
 
                 <section class="inv-section">
@@ -505,6 +538,56 @@
     </div>
 </div>
 
+<div class="inv-modal-backdrop inv-hidden" id="netportModal">
+    <div class="inv-modal" role="dialog" aria-modal="true" aria-labelledby="netportModalTitle">
+        <div class="inv-modal-header"><h2 id="netportModalTitle">Add network port</h2><button class="inv-close" id="closeNetportModal" type="button" aria-label="Close">×</button></div>
+        <div class="inv-modal-body">
+            <div class="inv-form-group">
+                <h3>Wall jack</h3><p class="inv-form-group-description">The cable run as labelled on site.</p>
+                <div class="inv-form-grid">
+                    <div class="inv-field"><label for="netportSite">Site</label><input class="inv-input" id="netportSite" maxlength="256" placeholder="Console/site, e.g. Office-UDM/Default"></div>
+                    <div class="inv-field"><label for="netportJack">Jack *</label><input class="inv-input" id="netportJack" maxlength="64" required placeholder="e.g. 2-14"></div>
+                    <div class="inv-field"><label for="netportRoom">Room / location</label><input class="inv-input" id="netportRoom" maxlength="256"></div>
+                    <div class="inv-field"><label for="netportStatus">Status</label><select class="inv-select" id="netportStatus"></select></div>
+                </div>
+            </div>
+            <div class="inv-form-group">
+                <h3>Patching</h3><p class="inv-form-group-description">Patch panel and the switch port the jack is patched to.</p>
+                <div class="inv-form-grid">
+                    <div class="inv-field"><label for="netportPatchPanel">Patch panel</label><input class="inv-input" id="netportPatchPanel" maxlength="128"></div>
+                    <div class="inv-field"><label for="netportPatchPanelPort">Patch panel port</label><input class="inv-input" id="netportPatchPanelPort" maxlength="32"></div>
+                    <div class="inv-field"><label for="netportSwitchName">Switch name</label><input class="inv-input" id="netportSwitchName" maxlength="256"></div>
+                    <div class="inv-field"><label for="netportSwitchMac">Switch MAC</label><input class="inv-input inv-mono" id="netportSwitchMac" maxlength="64" placeholder="aa:bb:cc:dd:ee:ff"></div>
+                    <div class="inv-field"><label for="netportSwitchPort">Switch port</label><input class="inv-input" id="netportSwitchPort" type="number" min="1" max="512" step="1"></div>
+                    <div class="inv-field"><label for="netportScope">Visible to</label><select class="inv-select" id="netportScope"></select></div>
+                    <div class="inv-field full"><label for="netportNotes">Notes</label><textarea class="inv-textarea" id="netportNotes" maxlength="4000"></textarea></div>
+                </div>
+            </div>
+        </div>
+        <div class="inv-modal-footer">
+            <button class="inv-button danger" id="deleteNetport" type="button">Delete</button>
+            <span class="inv-toolbar-spacer"></span>
+            <button class="inv-button" id="cancelNetport" type="button">Cancel</button>
+            <button class="inv-button primary" id="saveNetport" type="button">Save</button>
+        </div>
+    </div>
+</div>
+
+<div class="inv-modal-backdrop inv-hidden" id="netportImportModal">
+    <div class="inv-modal" role="dialog" aria-modal="true" aria-labelledby="netportImportModalTitle">
+        <div class="inv-modal-header"><h2 id="netportImportModalTitle">Import network ports</h2><button class="inv-close" id="closeNetportImportModal" type="button" aria-label="Close">×</button></div>
+        <div class="inv-modal-body">
+            <div class="inv-field" id="netportImportScopeField"><label for="netportImportScope">Visible to</label><select class="inv-select" id="netportImportScope"></select></div>
+            <div class="inv-import-summary" id="netportImportSummary"></div>
+            <div class="inv-preview-wrap"><table class="inv-preview"><thead><tr><th>Row</th><th>Site</th><th>Jack</th><th>Room</th><th>Patch panel</th><th>Switch</th><th>Port</th><th>Status</th><th>Validation</th></tr></thead><tbody id="netportImportRows"></tbody></table></div>
+        </div>
+        <div class="inv-modal-footer">
+            <button class="inv-button" id="cancelNetportImport" type="button">Cancel</button>
+            <button class="inv-button primary" id="confirmNetportImport" type="button" disabled>Import all</button>
+        </div>
+    </div>
+</div>
+
 <script>window.INVENTORY_BOOT = {{{boot}}};</script>
 <script>
 (function () {
@@ -516,7 +599,9 @@
         cardFilter: '', pendingListRequestId: '', pendingRequests: {}, requestedAssetId: '', activeTab: 'workstations',
         peripheralTypes: boot.peripheralTypes || ['Mouse', 'Keyboard', 'Headset', 'Monitor', 'Other'], capabilities: {},
         importRows: [], importPreview: [], keepAddAnother: false, page: 1, pageSize: 25, settings: null,
-        detailBaseline: '', detailDirty: false, modalTrigger: null
+        detailBaseline: '', detailDirty: false, modalTrigger: null,
+        netports: [], netportSites: [], netportStatuses: ['active', 'inactive', 'unpatched', 'faulty'], netportCapabilities: {},
+        netportsLoaded: false, netportsRequested: false, editingNetport: null, netportImportCsv: ''
     };
     var requestCounter = 0;
     var frameRequestPrefix = (boot.mode === 'device' ? 'device' : 'dashboard') + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
@@ -596,7 +681,14 @@
             'workstation-create': 'Adding workstation…',
             'peripheral-create': 'Adding peripheral…',
             'peripheral-preview': 'Validating CSV import…',
-            'peripheral-import': 'Importing peripherals…'
+            'peripheral-import': 'Importing peripherals…',
+            'netport-list': 'Loading network ports…',
+            'netport-create': 'Adding network port…',
+            'netport-update': 'Saving network port…',
+            'netport-delete': 'Deleting network port…',
+            'netport-preview': 'Validating network port import…',
+            'netport-import': 'Importing network ports…',
+            'netport-export': 'Exporting network ports…'
         };
         return messages[action] || 'Working…';
     }
@@ -683,7 +775,10 @@
 
     function readRequestedTab() {
         if (boot.mode === 'device') return 'workstations';
-        try { return new URL(window.parent.location.href).searchParams.get('inventorytab') === 'peripherals' ? 'peripherals' : 'workstations'; }
+        try {
+            var requestedTab = new URL(window.parent.location.href).searchParams.get('inventorytab');
+            return requestedTab === 'peripherals' || requestedTab === 'network' ? requestedTab : 'workstations';
+        }
         catch (error) { return 'workstations'; }
     }
 
@@ -702,7 +797,7 @@
     }
 
     function setActiveTab(tab, updateUrl) {
-        var nextTab = tab === 'peripherals' ? 'peripherals' : 'workstations';
+        var nextTab = tab === 'peripherals' || tab === 'network' ? tab : 'workstations';
         if (state.activeTab !== nextTab) byId('recordFilter').value = 'active';
         state.activeTab = nextTab;
         state.cardFilter = '';
@@ -711,6 +806,18 @@
         byId('peripheralsTab').classList.toggle('active', state.activeTab === 'peripherals');
         byId('workstationsTab').setAttribute('aria-selected', state.activeTab === 'workstations' ? 'true' : 'false');
         byId('peripheralsTab').setAttribute('aria-selected', state.activeTab === 'peripherals' ? 'true' : 'false');
+        byId('networkTab').classList.toggle('active', state.activeTab === 'network');
+        byId('networkTab').setAttribute('aria-selected', state.activeTab === 'network' ? 'true' : 'false');
+        var networkPorts = state.activeTab === 'network';
+        ['summaryCards', 'assetToolbar', 'assetTableWrap', 'dashboardMoreMenu'].forEach(function (id) { byId(id).classList.toggle('inv-hidden', networkPorts); });
+        byId('netportSection').classList.toggle('inv-hidden', !networkPorts);
+        if (networkPorts) {
+            ['rescanButton', 'addWorkstationButton', 'addPeripheralButton'].forEach(function (id) { byId(id).classList.add('inv-hidden'); });
+            if (updateUrl) setTabUrl();
+            renderNetports();
+            if (!state.netportsLoaded) send('netport-list', {});
+            return;
+        }
         var peripherals = state.activeTab === 'peripherals';
         byId('rescanButton').classList.toggle('inv-hidden', peripherals || !can('can_sync'));
         byId('settingsButton').classList.toggle('inv-hidden', !state.capabilities.canCreateManualWorkstation || !can('can_manage'));
@@ -831,6 +938,8 @@
             if (item.snoozedUntil && Date.parse(item.snoozedUntil + 'T23:59:59Z') >= Date.now()) return;
             reasons.push(labels[item.reason] || item.reason);
         });
+        var networkLabels = { 'network-undocumented': 'Undocumented network port', 'network-mismatch': 'Network jack mismatch' };
+        ((asset.network && asset.network.issues) || []).forEach(function (issue) { reasons.push(networkLabels[issue.kind] || issue.kind); });
         return reasons.filter(function (reason, index) { return reasons.indexOf(reason) === index; });
     }
 
@@ -930,7 +1039,7 @@
         var header = document.createElement('tr');
         var headings = state.activeTab === 'peripherals'
             ? ['Peripheral', 'Status', 'Assignee', 'Asset tag', 'Linked workstation', 'Location']
-            : ['Device', 'Status', 'Assignee', 'Location', 'Agent', 'Review'];
+            : ['Device', 'Status', 'Assignee', 'Location', 'Network', 'Agent', 'Review'];
         headings.forEach(function (heading) {
             var cell = node('th', '', heading);
             cell.setAttribute('scope', 'col');
@@ -985,6 +1094,11 @@
             row.appendChild(statusCell);
             row.appendChild(node('td', '', assignmentText(asset)));
             row.appendChild(node('td', '', value(asset.manual && asset.manual.location, '—')));
+            var networkCell = document.createElement('td');
+            var observedConnection = asset.network && asset.network.observed;
+            networkCell.appendChild(node('div', '', observedConnection ? connectionText(observedConnection) : '—'));
+            if (observedConnection && observedConnection.site) networkCell.appendChild(node('div', 'inv-muted', observedConnection.site));
+            row.appendChild(networkCell);
             var agentCondition = isManualWorkstation(asset) ? 'No agent' : value(asset.automatic && asset.automatic.condition, asset.automatic && asset.automatic.nodeExists === false ? 'Node missing' : (asset.automatic && asset.automatic.online ? 'Online' : 'Offline'));
             var agentCell = document.createElement('td');
             agentCell.appendChild(node('span', 'inv-presence ' + (agentCondition === 'Online' ? 'inv-online' : 'inv-offline'), agentCondition));
@@ -1280,6 +1394,7 @@
         }
 
         renderAssignment(asset);
+        renderNetwork(asset);
         renderHistory(asset);
         byId('saveButton').style.display = can('can_manage') ? '' : 'none';
         var nodeMissing = asset.automatic && asset.automatic.nodeExists === false;
@@ -1324,6 +1439,7 @@
             changes.osName = byId('workstationOsInput').value;
             changes.assignedUser = byId('workstationUserInput').value;
         }
+        if (can('can_manage')) changes.documentedJack = byId('documentedJackInput').value;
         return changes;
     }
 
@@ -1429,7 +1545,7 @@
             downloadCsv('meshcentral-peripherals-' + new Date().toISOString().substring(0, 10) + '.csv', rows);
             return;
         }
-        rows = [['Device', 'Group', 'Lifecycle', 'Record state', 'Agent condition', 'Assignment mode', 'Assignees', 'Assignment sources', 'Serial', 'UUID', 'Manufacturer', 'Model', 'Asset tag', 'Location', 'Operating system', 'Last seen']];
+        rows = [['Device', 'Group', 'Lifecycle', 'Record state', 'Agent condition', 'Assignment mode', 'Assignees', 'Assignment sources', 'Serial', 'UUID', 'Manufacturer', 'Model', 'Asset tag', 'Location', 'Operating system', 'Last seen', 'Network site', 'Connection', 'Switch or access point', 'Resolved jack', 'IP address', 'MAC address']];
         filteredAssets().forEach(function (asset) {
             var hardware = isManualWorkstation(asset) ? (asset.manualHardware || {}) : (asset.automatic || {});
             rows.push([
@@ -1438,7 +1554,13 @@
                 (asset.assignment.assignees || []).map(function (item) { return item.source || (isManualWorkstation(asset) ? 'manual' : 'agent'); }).join('; '),
                 asset.identity.serial, asset.identity.uuid, hardware.manufacturer, hardware.model,
                 asset.manual.assetTag, asset.manual.location, hardware.osName,
-                asset.automatic.lastSeen ? new Date(asset.automatic.lastSeen).toISOString() : ''
+                asset.automatic.lastSeen ? new Date(asset.automatic.lastSeen).toISOString() : '',
+                asset.network && asset.network.observed ? asset.network.observed.site : '',
+                asset.network && asset.network.observed ? asset.network.observed.connection : '',
+                asset.network && asset.network.observed ? connectionText(asset.network.observed) : '',
+                asset.network && asset.network.resolvedJack ? asset.network.resolvedJack.jack : '',
+                asset.network && asset.network.observed ? asset.network.observed.ip : '',
+                asset.network && asset.network.observed ? asset.network.observed.mac : ''
             ]);
         });
         downloadCsv('meshcentral-workstations-' + new Date().toISOString().substring(0, 10) + '.csv', rows);
@@ -1670,6 +1792,279 @@
         reader.readAsText(file);
     }
 
+    function connectionText(observed) {
+        if (!observed) return '';
+        if (observed.connection === 'wireless') return 'AP ' + value(observed.apName || observed.apMac, 'unknown') + (observed.ssid ? ' · ' + observed.ssid : '');
+        return value(observed.switchName || observed.switchMac, 'Unknown switch') + (observed.switchPort ? ' port ' + observed.switchPort : '');
+    }
+
+    function jackText(jack) {
+        if (!jack) return '';
+        return 'Jack ' + value(jack.jack) + (jack.site ? ' · ' + jack.site : '') + (jack.room ? ' · ' + jack.room : '');
+    }
+
+    function jackChain(asset, jack, observed) {
+        var parts = [value(asset.name, 'Device')];
+        if (jack) {
+            parts.push('wall jack ' + value(jack.jack));
+            if (jack.patchPanel || jack.patchPanelPort) parts.push('patch panel ' + value(jack.patchPanel, '?') + (jack.patchPanelPort ? ' port ' + jack.patchPanelPort : ''));
+        }
+        parts.push('switch ' + connectionText(observed));
+        return parts.join(' → ');
+    }
+
+    function populateJackSelect(select, selected, current) {
+        clear(select);
+        select.appendChild(new Option('Not documented', ''));
+        var seen = {};
+        state.netports.forEach(function (netport) {
+            seen[netport.id] = true;
+            select.appendChild(new Option(jackText(netport) + (netport.status !== 'active' ? ' (' + netport.status + ')' : ''), netport.id));
+        });
+        if (selected && !seen[selected]) select.appendChild(new Option(current ? jackText(current) : 'Unknown jack', selected));
+        select.value = selected || '';
+    }
+
+    function renderNetwork(asset) {
+        var networkInfo = asset.network || {};
+        var observed = networkInfo.observed;
+        var fields = byId('networkFields');
+        clear(fields);
+        if (observed) {
+            addField(fields, 'Site', observed.site);
+            addField(fields, 'Connection', observed.connection === 'wireless' ? 'Wireless' : (observed.connection === 'wired' ? 'Wired' : ''));
+            if (observed.connection === 'wireless') {
+                addField(fields, 'Access point', value(observed.apName) + (observed.apMac ? ' (' + observed.apMac + ')' : ''));
+                addField(fields, 'SSID', observed.ssid);
+            } else {
+                addField(fields, 'Switch', value(observed.switchName) + (observed.switchMac ? ' (' + observed.switchMac + ')' : ''));
+                addField(fields, 'Switch port', observed.switchPort);
+            }
+            addField(fields, 'IP address', observed.ip, 'inv-mono');
+            addField(fields, 'MAC address', observed.mac, 'inv-mono');
+            addField(fields, 'Seen', formatDate(observed.seenAt));
+            addField(fields, 'Source', observed.source);
+        } else {
+            addField(fields, 'Observed', 'No network observation recorded');
+        }
+        if ((networkInfo.knownMacs || []).length > 1) addField(fields, 'Known MACs', networkInfo.knownMacs.join(', '), 'inv-mono');
+        var resolved = networkInfo.resolvedJack;
+        addField(fields, 'Resolved jack', resolved ? jackText(resolved) + (resolved.ambiguous ? ' (more than one jack claims this port)' : '') : '');
+        var chain = byId('networkChain');
+        chain.textContent = observed && observed.connection === 'wired' ? jackChain(asset, resolved, observed) : '';
+        chain.classList.toggle('inv-hidden', !chain.textContent);
+        byId('documentedJackField').classList.toggle('inv-hidden', !can('can_manage') && !networkInfo.documentedJack);
+        populateJackSelect(byId('documentedJackInput'), networkInfo.documentedJack, networkInfo.documentedJackInfo);
+        byId('documentedJackInput').disabled = !can('can_manage');
+        var issues = byId('networkIssues');
+        clear(issues);
+        (networkInfo.issues || []).forEach(function (issue) { issues.appendChild(node('div', 'inv-review', issue.message)); });
+        if (!state.netportsLoaded && !state.netportsRequested && can('can_manage')) {
+            state.netportsRequested = true;
+            send('netport-list', {});
+        }
+    }
+
+    function filteredNetports() {
+        var search = byId('netportSearch').value.trim().toLowerCase();
+        var site = byId('netportSiteFilter').value;
+        var issueFilter = byId('netportIssueFilter').value;
+        return state.netports.filter(function (netport) {
+            if (site && netport.site !== site) return false;
+            if (issueFilter === 'issues' && !(netport.issues || []).length) return false;
+            if (issueFilter === 'observed' && !(netport.observedAssets || []).length) return false;
+            if (!search) return true;
+            return [netport.jack, netport.room, netport.patchPanel, netport.switchName, netport.switchMac, netport.notes].join(' ').toLowerCase().indexOf(search) >= 0;
+        });
+    }
+
+    function renderNetports() {
+        var siteFilter = byId('netportSiteFilter');
+        var selectedSite = siteFilter.value;
+        clear(siteFilter);
+        siteFilter.appendChild(new Option('All sites', ''));
+        state.netportSites.forEach(function (site) { siteFilter.appendChild(new Option(site, site)); });
+        siteFilter.value = state.netportSites.indexOf(selectedSite) >= 0 ? selectedSite : '';
+        var manage = can('can_manage') && state.netportCapabilities.canManage !== false;
+        ['netportTemplateButton', 'netportImportButton', 'addNetportButton'].forEach(function (id) { byId(id).classList.toggle('inv-hidden', !manage); });
+        var body = byId('netportRows');
+        clear(body);
+        var netports = filteredNetports();
+        byId('netportEmpty').style.display = netports.length ? 'none' : 'block';
+        byId('netportEmpty').textContent = !state.netportsLoaded ? 'Loading network ports…' : (state.netports.length ? 'No network ports match the current filters.' : 'No network ports have been documented.');
+        netports.forEach(function (netport) {
+            var row = document.createElement('tr');
+            if (manage) {
+                row.tabIndex = 0;
+                row.setAttribute('role', 'link');
+                row.setAttribute('aria-label', 'Edit jack ' + value(netport.jack));
+                row.addEventListener('click', function () { openNetportModal(netport); });
+                row.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openNetportModal(netport); }
+                });
+            }
+            var jackCell = document.createElement('td');
+            jackCell.className = 'inv-device-cell';
+            jackCell.appendChild(node('div', 'inv-device', value(netport.jack, '—')));
+            if (netport.notes) jackCell.appendChild(node('div', 'inv-muted', netport.notes.length > 60 ? netport.notes.substring(0, 60) + '…' : netport.notes));
+            row.appendChild(jackCell);
+            row.appendChild(node('td', '', value(netport.site, '—')));
+            row.appendChild(node('td', '', value(netport.room, '—')));
+            row.appendChild(node('td', '', netport.patchPanel || netport.patchPanelPort ? value(netport.patchPanel, '—') + (netport.patchPanelPort ? ' · ' + netport.patchPanelPort : '') : '—'));
+            var switchCell = document.createElement('td');
+            switchCell.appendChild(node('div', '', netport.switchName || netport.switchMac || netport.switchPort ? value(netport.switchName || netport.switchMac, 'Switch') + (netport.switchPort ? ' port ' + netport.switchPort : '') : '—'));
+            if (netport.switchMac && netport.switchName) switchCell.appendChild(node('div', 'inv-muted inv-mono', netport.switchMac));
+            row.appendChild(switchCell);
+            var statusCell = document.createElement('td');
+            statusCell.appendChild(node('span', 'inv-badge ' + (netport.status === 'active' ? 'assigned' : (netport.status === 'faulty' ? 'retired' : 'in-repair')), netport.status));
+            row.appendChild(statusCell);
+            row.appendChild(node('td', '', (netport.observedAssets || []).map(function (item) { return value(item.name, item.id); }).join(', ') || '—'));
+            var issueCell = document.createElement('td');
+            var issues = netport.issues || [];
+            if (!issues.length) { issueCell.className = 'inv-muted'; issueCell.textContent = 'Clear'; }
+            else {
+                var badge = node('span', 'inv-review-badge', issues.length === 1 ? 'Duplicate switch port' : issues.length + ' issues');
+                badge.title = issues.map(function (issue) { return issue.message; }).join('\n');
+                issueCell.appendChild(badge);
+            }
+            row.appendChild(issueCell);
+            body.appendChild(row);
+        });
+    }
+
+    function populateNetportScope(select, selected, scope) {
+        clear(select);
+        if (state.netportCapabilities.canUseDomainScope) select.appendChild(new Option('Everyone in this domain', ''));
+        var groups = {};
+        state.assets.forEach(function (asset) {
+            if (asset.meshid && !isPeripheral(asset)) groups[asset.meshid] = asset.meshName || asset.meshid;
+        });
+        if (scope && scope.meshid && !groups[scope.meshid]) groups[scope.meshid] = scope.meshName || scope.meshid;
+        Object.keys(groups).sort(function (a, b) { return groups[a].localeCompare(groups[b]); }).forEach(function (meshid) {
+            select.appendChild(new Option('Device group: ' + groups[meshid], meshid));
+        });
+        if (selected !== undefined && Array.prototype.some.call(select.options, function (option) { return option.value === selected; })) select.value = selected;
+    }
+
+    function openNetportModal(netport) {
+        state.editingNetport = netport || null;
+        state.modalTrigger = document.activeElement;
+        var source = netport || { status: 'active', site: byId('netportSiteFilter').value };
+        byId('netportModalTitle').textContent = netport ? 'Edit network port' : 'Add network port';
+        clear(byId('netportStatus'));
+        state.netportStatuses.forEach(function (status) { byId('netportStatus').appendChild(new Option(status, status)); });
+        byId('netportStatus').value = source.status || 'active';
+        byId('netportSite').value = value(source.site);
+        byId('netportJack').value = value(source.jack);
+        byId('netportRoom').value = value(source.room);
+        byId('netportPatchPanel').value = value(source.patchPanel);
+        byId('netportPatchPanelPort').value = value(source.patchPanelPort);
+        byId('netportSwitchName').value = value(source.switchName);
+        byId('netportSwitchMac').value = value(source.switchMac);
+        byId('netportSwitchPort').value = value(source.switchPort);
+        byId('netportNotes').value = value(source.notes);
+        populateNetportScope(byId('netportScope'), netport && netport.scope && netport.scope.meshid || '', netport && netport.scope);
+        byId('deleteNetport').classList.toggle('inv-hidden', !netport);
+        byId('netportModal').classList.remove('inv-hidden');
+        byId('netportJack').focus();
+    }
+
+    function closeNetportModal() {
+        byId('netportModal').classList.add('inv-hidden');
+        state.editingNetport = null;
+        if (state.modalTrigger && state.modalTrigger.focus) state.modalTrigger.focus();
+        state.modalTrigger = null;
+    }
+
+    function netportFormValue() {
+        return {
+            site: byId('netportSite').value,
+            jack: byId('netportJack').value,
+            room: byId('netportRoom').value,
+            patchPanel: byId('netportPatchPanel').value,
+            patchPanelPort: byId('netportPatchPanelPort').value,
+            switchName: byId('netportSwitchName').value,
+            switchMac: byId('netportSwitchMac').value,
+            switchPort: byId('netportSwitchPort').value,
+            status: byId('netportStatus').value,
+            notes: byId('netportNotes').value,
+            meshid: byId('netportScope').value
+        };
+    }
+
+    function saveNetport() {
+        if (!byId('netportJack').value.trim()) {
+            showToast('Enter a jack label.', true);
+            byId('netportJack').focus();
+            return;
+        }
+        if (state.editingNetport) send('netport-update', { netportId: state.editingNetport.id, changes: netportFormValue() });
+        else send('netport-create', { netport: netportFormValue() });
+    }
+
+    function deleteNetport() {
+        var netport = state.editingNetport;
+        if (!netport) return;
+        if (!window.confirm('Delete network port ' + value(netport.jack) + (netport.site ? ' at ' + netport.site : '') + '?\n\nAssets documented at this jack will be flagged for review.')) return;
+        send('netport-delete', { netportId: netport.id, confirm: true });
+    }
+
+    function downloadText(filename, content) {
+        var blob = new Blob(['﻿' + value(content)], { type: 'text/csv;charset=utf-8' });
+        var objectUrl = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 1000);
+    }
+
+    function selectNetportCsv(event) {
+        var file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        if (file.size > 1024 * 1024) { showToast('CSV files are limited to 1 MB.', true); return; }
+        var reader = new FileReader();
+        reader.onload = function () {
+            state.netportImportCsv = value(reader.result);
+            populateNetportScope(byId('netportImportScope'), '');
+            send('netport-preview', { csv: state.netportImportCsv, meshid: byId('netportImportScope').value });
+        };
+        reader.onerror = function () { showToast('The CSV file could not be read.', true); };
+        reader.readAsText(file);
+    }
+
+    function closeNetportImportModal() {
+        byId('netportImportModal').classList.add('inv-hidden');
+        state.netportImportCsv = '';
+        if (state.modalTrigger && state.modalTrigger.focus) state.modalTrigger.focus();
+        state.modalTrigger = null;
+    }
+
+    function renderNetportImportPreview(rows) {
+        var preview = rows || [];
+        var invalid = preview.filter(function (row) { return row.errors && row.errors.length; }).length;
+        byId('netportImportSummary').textContent = preview.length + ' row' + (preview.length === 1 ? '' : 's') + ' · ' + (invalid ? invalid + ' require correction' : 'all rows valid');
+        byId('netportImportSummary').classList.toggle('inv-import-errors', invalid > 0);
+        var body = byId('netportImportRows');
+        clear(body);
+        preview.forEach(function (row) {
+            var item = row.value || {};
+            var tr = document.createElement('tr');
+            [row.rowNumber, item.site, item.jack, item.room, value(item.patchPanel) + (item.patchPanelPort ? ' · ' + item.patchPanelPort : ''),
+                value(item.switchName || item.switchMac), item.switchPort, item.status,
+                row.errors && row.errors.length ? row.errors.join(' ') : 'Ready'].forEach(function (cell, index) {
+                tr.appendChild(node('td', index === 8 && row.errors && row.errors.length ? 'inv-import-errors' : '', value(cell, '—')));
+            });
+            body.appendChild(tr);
+        });
+        byId('confirmNetportImport').disabled = invalid > 0 || preview.length === 0;
+        byId('netportImportModal').classList.remove('inv-hidden');
+        byId('closeNetportImportModal').focus();
+    }
+
     function receive(message) {
         // MeshCentral delivers plugin responses through the parent page. More
         // than one Inventory iframe can exist there (the dashboard plus a
@@ -1758,6 +2153,26 @@
                 closeImportModal();
                 showToast(importedCount + ' peripheral' + (importedCount === 1 ? '' : 's') + ' imported.');
             }
+        } else if (result.kind === 'netport-list') {
+            state.netports = result.netports || [];
+            state.netportSites = result.sites || [];
+            state.netportStatuses = result.statuses || state.netportStatuses;
+            state.netportCapabilities = result.capabilities || {};
+            state.netportsLoaded = true;
+            renderNetports();
+            if (state.selected) populateJackSelect(byId('documentedJackInput'), byId('documentedJackInput').value, state.selected.network && state.selected.network.documentedJackInfo);
+        } else if (result.kind === 'netport-created' || result.kind === 'netport' || result.kind === 'netport-deleted') {
+            closeNetportModal();
+            showToast(result.kind === 'netport-created' ? 'Network port added.' : (result.kind === 'netport-deleted' ? 'Network port deleted.' : (result.unchanged ? 'No changes to save.' : 'Network port saved.')));
+            send('netport-list', {});
+        } else if (result.kind === 'netport-preview') {
+            renderNetportImportPreview(result.rows || []);
+        } else if (result.kind === 'netport-imported') {
+            closeNetportImportModal();
+            showToast((Number(result.count) || 0) + ' network port' + (result.count === 1 ? '' : 's') + ' imported.');
+            send('netport-list', {});
+        } else if (result.kind === 'netport-export') {
+            downloadText('network-ports-' + new Date().toISOString().substring(0, 10) + '.csv', result.csv);
         } else if (result.kind === 'rescan') {
             showToast('Inventory synchronization completed.');
             send('list', {});
@@ -1807,13 +2222,31 @@
         state.peripheralTypes.forEach(function (type) { byId('typeFilter').appendChild(new Option(type, type)); });
         byId('workstationsTab').addEventListener('click', function () { setActiveTab('workstations', true); });
         byId('peripheralsTab').addEventListener('click', function () { setActiveTab('peripherals', true); });
+        byId('networkTab').addEventListener('click', function () { setActiveTab('network', true); });
         byId('inventoryTabs').addEventListener('keydown', function (event) {
             if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
             event.preventDefault();
-            var next = state.activeTab === 'workstations' ? 'peripherals' : 'workstations';
+            var tabs = ['workstations', 'peripherals', 'network'];
+            var next = tabs[(tabs.indexOf(state.activeTab) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
             setActiveTab(next, true);
-            byId(next === 'workstations' ? 'workstationsTab' : 'peripheralsTab').focus();
+            byId(next + 'Tab').focus();
         });
+        byId('netportSearch').addEventListener('input', renderNetports);
+        byId('netportSiteFilter').addEventListener('change', renderNetports);
+        byId('netportIssueFilter').addEventListener('change', renderNetports);
+        byId('addNetportButton').addEventListener('click', function () { openNetportModal(null); });
+        byId('closeNetportModal').addEventListener('click', closeNetportModal);
+        byId('cancelNetport').addEventListener('click', closeNetportModal);
+        byId('saveNetport').addEventListener('click', saveNetport);
+        byId('deleteNetport').addEventListener('click', deleteNetport);
+        byId('netportExportButton').addEventListener('click', function () { send('netport-export', { site: byId('netportSiteFilter').value }); });
+        byId('netportTemplateButton').addEventListener('click', function () { downloadText('network-port-import-template.csv', 'site,jack,room,patchPanel,patchPanelPort,switchName,switchMac,switchPort,status,notes\r\n'); });
+        byId('netportImportButton').addEventListener('click', function () { state.modalTrigger = byId('netportImportButton'); byId('netportImportInput').click(); });
+        byId('netportImportInput').addEventListener('change', selectNetportCsv);
+        byId('netportImportScope').addEventListener('change', function () { if (state.netportImportCsv) send('netport-preview', { csv: state.netportImportCsv, meshid: this.value }); });
+        byId('closeNetportImportModal').addEventListener('click', closeNetportImportModal);
+        byId('cancelNetportImport').addEventListener('click', closeNetportImportModal);
+        byId('confirmNetportImport').addEventListener('click', function () { send('netport-import', { csv: state.netportImportCsv, meshid: byId('netportImportScope').value }); });
         byId('searchInput').addEventListener('input', function () { state.page = 1; renderRows(); });
         byId('statusFilter').addEventListener('change', function () { state.page = 1; state.cardFilter = ''; renderSummary(); renderRows(); });
         byId('typeFilter').addEventListener('change', function () { state.page = 1; renderRows(); });
@@ -1891,6 +2324,8 @@
                     else if (modal.id === 'peripheralModal') closePeripheralModal();
                     else if (modal.id === 'importModal') closeImportModal();
                     else if (modal.id === 'settingsModal') closeSettingsModal();
+                    else if (modal.id === 'netportModal') closeNetportModal();
+                    else if (modal.id === 'netportImportModal') closeNetportImportModal();
                 } else {
                     byId('dashboardMoreMenu').open = false;
                     byId('detailMoreMenu').open = false;

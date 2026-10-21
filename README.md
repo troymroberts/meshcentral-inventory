@@ -19,6 +19,41 @@ Inventory and lifecycle management for MeshCentral workstations and peripherals.
 - Detects missing, stale, duplicate, and conflicting records.
 - Includes CSV peripheral import/export, permissions, and audit history.
 - Downloads and restores a full, validated Inventory backup.
+- Documents wall jacks, patch panels, and switch ports, and records where each asset was last seen on the network.
+
+## Network
+
+The **Network ports** tab documents each cable run: site, jack, room, patch panel and port, switch name, switch MAC, switch port, status (`active`, `inactive`, `unpatched`, `faulty`), and notes. Ports can be added one at a time or imported from CSV with a validated preview, and exported to CSV. CSV columns:
+
+```text
+site,jack,room,patchPanel,patchPanelPort,switchName,switchMac,switchPort,status,notes
+```
+
+A jack must be unique within its site, and two active ports cannot claim the same switch MAC and port. Network ports are scoped like peripherals: to a device group, or to the whole domain (full administrators only).
+
+Each asset keeps its latest network sighting. When the observed switch MAC and port match an active network port, the asset detail shows the full chain, for example `HazelPC → wall jack 2-14 → patch panel A port 14 → switch BSL-SW1 port 14`. A manager can also record the jack an asset is supposed to use (**Documented jack**). These checks appear with the other review items:
+
+- `network-undocumented` — the asset was seen on a wired switch port that no active network port documents.
+- `network-mismatch` — the asset has a documented jack, but its wired switch port resolves to a different jack or none.
+- `netport-duplicate-switch-port` — two active network ports claim the same switch port (shown on the Network ports tab).
+
+### Reporting an observation
+
+Sightings come from an external collector, such as an MCP client that reads UniFi client data. The collector needs **Manage inventory** and sends a plugin action over the MeshCentral websocket:
+
+```json
+{
+  "action": "plugin", "plugin": "inventory", "pluginaction": "network-observe", "requestId": "unifi-1",
+  "nodeid": "node//abc123",
+  "observation": {
+    "mac": "aa:bb:cc:dd:ee:01", "ip": "10.0.0.5", "site": "Office-UDM/Default",
+    "connection": "wired", "switchName": "BSL-SW1", "switchMac": "aa:bb:cc:00:00:01", "switchPort": 14,
+    "source": "unifi-mcp", "seenAt": "2026-10-21T10:00:00Z"
+  }
+}
+```
+
+Identify the asset with `assetId`, `nodeid`, or `mac` (checked in that order). A MAC is matched against the interfaces MeshCentral agents report, then against MACs the asset was previously observed with. Wireless sightings use `apName`, `apMac`, and `ssid` instead of the switch fields. Audit history is written only when the site, switch, port, or access point changes; otherwise only the sighting time is refreshed. Sightings older than the stored one are ignored.
 
 ## How it works
 
